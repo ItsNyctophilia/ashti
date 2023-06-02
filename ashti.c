@@ -7,6 +7,7 @@
 #include <netdb.h>
 
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -157,13 +158,16 @@ int main(int argc, char *argv[])
 				}
 			} else if (received < 0) {
 				perror("Unable to receive");
-				// Error?
+				// Error? Maybe remove???
 			}
 			// Potentially sometimes overwrites a single char?
 			buffer[total_received] = '\0';	// Null-terminate the received message
 			printf("Received message:\n%s\n", buffer);
 			int err = 0;
 			char *filename = extract_filename(buffer, &err);
+			size_t code = 200;	// Default is '200 OK'
+			char *header = NULL;
+
 			if (!filename) {
 				printf("error2");
 				// error handling for 400 error and malloc issues
@@ -172,65 +176,47 @@ int main(int argc, char *argv[])
 			bool valid =
 			    validate_request_legality(argv[1], filename,
 						      &full_name);
-			if (!valid) {
-				printf("Error1");
-				// error handling for generic errors and malloc issues
+			if (!valid && !full_name) {
+				perror
+				    ("Failed to reallocate memory for buffer");
+				return EX_OSERR;
+			} else if (!valid && errno == ENOENT) {
+				code = 404;
+			} else if (!valid) {
+				code = 403;
 			}
-			// int fd = open(filename, O_RDONLY);
-			// struct stat stat_buffer;
-			// stat(filename, &stat_buffer);
-			// puts("HERE?");
-			// sendfile(remote, fd, NULL, stat_buffer.st_size);
-
-			// free(filename);
-			// free(buffer);  // Free the dynamically allocated buffer
-			// After the validate_request_legality call
-			printf("-> %s\n", full_name);
 			// Get a file descriptor for sendfile() call later
 			int fd = open(full_name, O_RDONLY);
 			if (fd < 0) {
 				perror("Failed to open file");
-				free(full_name);
-				free(filename);
-				free(buffer);
-				close(remote);
-				return -1;
+				goto cleanup;
 			}
 			// Retrieve filesize for sendfile() call
 			struct stat stat_buffer;
 			if (stat(full_name, &stat_buffer) != 0) {
 				perror("Failed to retrieve file information");
-				free(full_name);
-				free(filename);
-				free(buffer);
 				close(fd);
-				close(remote);
-				return -1;
+				goto cleanup;
 			}
-			free(full_name);
 
-			char *header =
-			    prepare_headers(200, filename, stat_buffer.st_size);
+			header =
+			    prepare_headers(code, filename,
+					    stat_buffer.st_size);
 			send(remote, header, strlen(header), 0);
-			free(header);
 			// Send file to remote client
 			ssize_t bytes_sent =
 			    sendfile(remote, fd, NULL, stat_buffer.st_size);
 			if (bytes_sent == -1) {
 				perror("Failed to send file");
-				free(filename);
-				free(buffer);
 				close(fd);
-				close(remote);
-				return -1;
+				goto cleanup;
 			}
-			// devprint
-			// printf("Sent %zd bytes\n", bytes_sent);
 
-			// Cleanup
+ cleanup:
+			free(full_name);
 			free(filename);
 			free(buffer);
-			close(fd);
+			free(header);
 			close(remote);
 			putchar('\n');
 
@@ -375,6 +361,8 @@ bool validate_request_legality(const char *root, const char *target,
 	char *full_path = NULL;
 	char *final_path = NULL;
 	bool is_legal = false;
+	// Default error is 403 forbidden
+	const char *err_format = "%s/error/403.html";
 
 	root_path = realpath(root, NULL);
 	if (!root_path) {
@@ -397,18 +385,30 @@ bool validate_request_legality(const char *root, const char *target,
 
 	if (!strstr(target, "cgi-bin/")) {
 		// Default directory is "www"
-		snprintf(full_path, full_path_len, "%s/www%s", root_path,
+		snprintf(full_path, full_path_len, "%s/www/%s", root_path,
 			 target);
 	} else {
 		// If user specifies "cgi-bin", do not add "www"
 		snprintf(full_path, full_path_len, "%s/%s", root_path, target);
 	}
-	*full_name = strdup(full_path);
 
 	final_path = realpath(full_path, NULL);
 	if (!final_path) {
-		// Either path cannot be allocated OR some other file-related
-		// error occurred
+		if (errno == ENOMEM) {
+			goto cleanup;
+		} else if (errno == ENOENT) {
+			// File not found
+			err_format = "%s/error/404.html";
+		}
+		// 16 bytes from "/error/404.html" + '\0'
+		size_t err_path_len = root_path_len + 16;
+		char *err_path = malloc(sizeof(*err_path) * err_path_len);
+		if (!err_path) {
+			// Malloc error
+			goto cleanup;
+		}
+		snprintf(err_path, root_path_len + 16, err_format, root_path);
+		*full_name = err_path;
 		goto cleanup;
 	}
 
@@ -430,6 +430,19 @@ bool validate_request_legality(const char *root, const char *target,
 		}
 		free(tmp);
 	}
+	if (is_legal) {
+		*full_name = strdup(full_path);
+	} else {
+		// 16 bytes from "/error/403.html" + '\0'
+		size_t err_path_len = root_path_len + 16;
+		char *err_path = malloc(sizeof(*err_path) * err_path_len);
+		if (!err_path) {
+			// Malloc error
+			goto cleanup;
+		}
+		snprintf(err_path, root_path_len + 16, err_format, root_path);
+		*full_name = err_path;
+	}
 
  cleanup:
 	free(root_path);
@@ -441,7 +454,7 @@ bool validate_request_legality(const char *root, const char *target,
 char *prepare_headers(const size_t server_code,
 		      const char *filename, const off_t filesize)
 {
-	char *header_msg = "";
+	const char *header_msg;
 	switch (server_code) {
 	case 200:
 		header_msg = "200 OK";
@@ -467,7 +480,7 @@ char *prepare_headers(const size_t server_code,
 
 	// This will very likely fail if multiple extensions are provided
 	// ex. file.txt.html.gif
-	char *filetype = "";
+	const char *filetype;
 	if (server_code == 200) {
 		// Assign filetype based on extension
 		if (strstr(filename, ".txt") || strstr(filename, ".text")) {
@@ -501,14 +514,16 @@ char *prepare_headers(const size_t server_code,
 	strftime(date_buf, 30, "%a, %d %b %Y %X GMT", date);
 
 	// Prepare final string
-	char *format_str =
-	    "HTTP/1.1 %s\r\nDate: %s\r\nContent-Type: %s\r\nContent-Length: %d\r\n\r\n";
+	const char *c_type = "Content-Type:";
+	const char *c_len = "Content-Length:";
+	const char *format_str =
+	    "HTTP/1.1 %s\r\nDate: %s\r\n%s %s\r\n%s %d\r\n\r\n";
 
 	// Response header at absolute longest should not exceed 150 bytes
 	char *final_buf = malloc(sizeof(*final_buf) * 150);
 
-	snprintf(final_buf, 150, format_str, header_msg, date_buf, filetype,
-		 filesize);
+	snprintf(final_buf, 150, format_str, header_msg,
+		 date_buf, c_type, filetype, c_len, filesize);
 
 	return final_buf;
 }

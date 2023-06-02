@@ -7,6 +7,7 @@
 #include <netdb.h>
 
 #include <dirent.h>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -17,12 +18,15 @@
 #include <arpa/inet.h>
 
 #include <sys/socket.h>
+#include <sys/sendfile.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 
 char *uid_to_str(uid_t uid);
 int validate_root_dir(const char *directory);
 char *extract_filename(const char *request, int *err);
 bool validate_request_method(const char *request);
+bool validate_request_legality(const char *root, const char *target, char **full_name);
 
 int main(int argc, char *argv[])
 {
@@ -63,6 +67,10 @@ int main(int argc, char *argv[])
         perror("Could not create socket");
         freeaddrinfo(results);
         return EX_OSERR;
+    }
+    int enable = 1;
+    if (setsockopt(sd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0) {
+        perror("Could not mark socket for address reuse");
     }
 
     err = bind(sd, results->ai_addr, results->ai_addrlen);
@@ -120,8 +128,8 @@ int main(int argc, char *argv[])
             }
 
             size_t total_received = 0;
-            ssize_t received;
-            while((received = recv(remote, buffer + total_received, buffer_size - total_received - 1, 0)) > 0) {
+            ssize_t received = recv(remote, buffer + total_received, buffer_size - total_received - 1, 0);
+            if (received > 0) {
                 total_received += (size_t)received;
                 if(total_received >= buffer_size - 1) {
                     // Expand the buffer size using realloc
@@ -134,10 +142,8 @@ int main(int argc, char *argv[])
                         return EX_OSERR;
                     }
                     buffer = new_buffer;
-                }
-            }
-
-            if(received < 0) {
+                    }
+            } else if (received < 0) {
                 perror("Unable to receive");
                 // Error?
             }
@@ -151,9 +157,58 @@ int main(int argc, char *argv[])
                 printf("error2");
                 // error handling for 400 error and malloc issues
             }
-            
+            char *full_name = NULL;
+            bool valid = validate_request_legality(argv[1], filename, &full_name);
+            if (!valid) {
+                printf("Error1");
+                // error handling for generic errors and malloc issues
+            }
+            // int fd = open(filename, O_RDONLY);
+            // struct stat stat_buffer;
+            // stat(filename, &stat_buffer);
+            // puts("HERE?");
+            // sendfile(remote, fd, NULL, stat_buffer.st_size);
 
-            free(buffer);  // Free the dynamically allocated buffer
+            // free(filename);
+            // free(buffer);  // Free the dynamically allocated buffer
+            // After the validate_request_legality call
+            printf("-> %s\n", full_name);
+            int fd = open(full_name, O_RDONLY);
+            if (fd < 0) {
+                perror("Failed to open file");
+                free(full_name);
+                free(filename);
+                free(buffer);
+                close(remote);
+                return -1;
+            }
+
+            struct stat stat_buffer;
+            if (stat(full_name, &stat_buffer) != 0) {
+                perror("Failed to retrieve file information");
+                free(full_name);
+                free(filename);
+                free(buffer);
+                close(fd);
+                close(remote);
+                return -1;
+            }
+            free(full_name);
+            ssize_t bytes_sent = sendfile(remote, fd, NULL, stat_buffer.st_size);
+            if (bytes_sent == -1) {
+                perror("Failed to send file");
+                free(filename);
+                free(buffer);
+                close(fd);
+                close(remote);
+                return -1;
+            }
+
+            printf("Sent %zd bytes\n", bytes_sent);
+
+            free(filename);
+            free(buffer);
+            close(fd);
             close(remote);
             putchar('\n');
 
@@ -290,4 +345,74 @@ bool validate_request_method(const char *request)
 		return false;
 	}
 	return true;
+}
+
+bool validate_request_legality(const char *root, const char *target, char **full_name)
+{
+	char *root_path = NULL;
+	char *full_path = NULL;
+	char *final_path = NULL;
+	bool is_legal = false;
+
+	root_path = realpath(root, NULL);
+	if (!root_path) {
+		// TODO: disambiguate OOM case
+		goto cleanup;
+	}
+
+	size_t root_path_len = strlen(root_path);
+	if (root_path[root_path_len - 1] == '/') {
+		// Prune trailing slash if present
+		root_path[root_path_len - 1] = '\0';
+	}
+
+	// Two paths combined + '/www/' + '\0'
+	size_t full_path_len = root_path_len + strlen(target) + 6;
+	full_path = malloc(sizeof(*full_path) * full_path_len);
+	if (!full_path) {
+		// TODO: disambiguate OOM case
+		goto cleanup;
+	}
+
+	if (!strstr(target, "cgi-bin/")) {
+		// Default directory is "www"
+		snprintf(full_path, full_path_len, "%s/www%s", root_path, target);
+	} else {
+		// If user specifies "cgi-bin", do not add "www"
+		snprintf(full_path, full_path_len, "%s/%s", root_path, target);
+	}
+    *full_name = strdup(full_path);
+
+	final_path = realpath(full_path, NULL);
+	if (!final_path) {
+		// Either path cannot be allocated OR some other file-related
+		// error occurred
+		goto cleanup;
+	}
+
+	const char *legal_folders[2] = { "/cgi-bin", "/www" };
+	for (size_t i = 0; i < 2; ++i) {
+		// path length + "/cgi-bin" + '\0' at most
+		size_t sub_folder_path_len = root_path_len + 9;
+		char *tmp = malloc(sizeof(*tmp) * sub_folder_path_len);
+		if (!tmp) {
+			// TODO: disambiguate OOM case
+			goto cleanup;
+		}
+		snprintf(tmp, sub_folder_path_len,
+				 "%s%s", root_path, legal_folders[i]);
+		if (strstr(final_path, tmp)) {
+			free(tmp);
+			is_legal = true;
+			break;
+		}
+		free(tmp);
+	}
+	
+
+cleanup:
+	free(root_path);
+	free(full_path);
+	free(final_path);
+	return is_legal;
 }

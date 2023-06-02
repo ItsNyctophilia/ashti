@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <netdb.h>
 
+#include <dirent.h>
 #include <stdio.h>
 #include <string.h>
 #include <sysexits.h>
@@ -18,13 +19,20 @@
 #include <sys/types.h>
 
 char *uid_to_str(uid_t uid);
-
+int validate_root_dir(const char *directory);
 
 int main(int argc, char *argv[])
 {
     if(argc == 1 || argc > 2) {
         fprintf(stderr, "Usage: %s server_root\n", argv[0]);
         return EX_USAGE;
+    }
+    int rc = validate_root_dir(argv[1]);
+    if (rc == -1) {
+        return EX_USAGE;
+    } else if (rc == EX_OSERR) {
+        perror("Failed to allocate memory for buffer");
+        return EX_OSERR;
     }
 
     struct addrinfo hints = {0};
@@ -159,4 +167,67 @@ char *uid_to_str(uid_t uid)
     }
     snprintf(uid_str, 7, "%d", uid);
     return uid_str;
+}
+
+int validate_root_dir(const char *directory)
+{
+    // Return code; success by default
+    int rc = 0;
+	char *dir_cpy = strdup(directory);
+	if (!dir_cpy) {
+		return EX_OSERR;
+	}
+
+	DIR *dir = opendir(dir_cpy);
+	if (dir) {
+		closedir(dir);
+		
+		size_t dir_len = strlen(directory);
+		// strlen(directory) + '\0' + "/cgi-bin" at longest
+		size_t new_dir_len = dir_len + 9;
+		char *tmp = realloc(dir_cpy, new_dir_len);
+		if (!tmp) {
+			rc = EX_OSERR;
+            goto cleanup;
+		}
+		dir_cpy = tmp;
+
+		if (directory[dir_len - 1] == '/') {
+			// Prune trailing slash if present
+			dir_cpy[dir_len - 1] = '\0';
+		}
+
+		// Sub-directories to check for
+		const char *dirs[2] = { "/cgi-bin", "/www" };
+		// Check for each sub-directory
+		for (size_t i = 0; i < 2; ++i) {
+			char *tmp = malloc(sizeof(*tmp) * new_dir_len);
+			if (!tmp) {
+                rc = EX_OSERR;
+                goto cleanup;
+			}
+			snprintf(tmp, new_dir_len, "%s%s", dir_cpy, dirs[i]);
+			DIR *sub_dir = opendir(tmp);
+			if (!sub_dir) {
+				fprintf(stderr, "Unable to find %s", tmp);
+				// Format perror
+				perror(" \b");
+				free(tmp);
+                rc = -1;
+				goto cleanup;
+			}
+			closedir(sub_dir);
+			free(tmp);
+		}
+
+	} else {
+		fprintf(stderr, "Unable to find %s", dir_cpy);
+		// Format perror
+		perror(" \b");
+        rc = -1;
+	}
+
+cleanup:
+	free(dir_cpy);
+	return rc;
 }

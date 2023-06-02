@@ -164,30 +164,59 @@ int main(int argc, char *argv[])
 			buffer[total_received] = '\0';	// Null-terminate the received message
 			printf("Received message:\n%s\n", buffer);
 			int err = 0;
-			char *filename = extract_filename(buffer, &err);
-			size_t code = 200;	// Default is '200 OK'
-			char *header = NULL;
+            size_t code = 200;	// Default is '200 OK'
+            char *header = NULL;
+            char *full_name = NULL;
 
+			char *filename = extract_filename(buffer, &err);
 			if (!filename) {
-				printf("error2");
-				// error handling for 400 error and malloc issues
+				code = err;
+                full_name = strdup("error/400.html");
 			}
-			char *full_name = NULL;
-			bool valid =
-			    validate_request_legality(argv[1], filename,
-						      &full_name);
-			if (!valid && !full_name) {
-				perror
-				    ("Failed to reallocate memory for buffer");
-				return EX_OSERR;
-			} else if (!valid && errno == ENOENT) {
-				code = 404;
-			} else if (!valid) {
-				code = 403;
-			}
+            if (code == 200) {
+                bool valid =
+                    validate_request_legality(argv[1], filename,
+                                &full_name);
+                if (!valid && !full_name) {
+                    perror
+                        ("Failed to reallocate memory for buffer");
+                    return EX_OSERR;
+                } else if (!valid && errno == ENOENT) {
+                    code = 404;
+                } else if (!valid) {
+                    code = 403;
+                }
+            }
 			// Get a file descriptor for sendfile() call later
 			int fd = open(full_name, O_RDONLY);
 			if (fd < 0) {
+                if (errno == EACCES) {
+                    // Only occurs when file exists and has
+                    code = 403;
+                    free(full_name);
+                    full_name = strdup("error/403.html");
+                    struct stat stat_buffer;
+                    if (stat(full_name, &stat_buffer) != 0) {
+                        perror("Failed to retrieve file information");
+                        close(fd);
+                        goto cleanup;
+                    }
+                    header = prepare_headers(code, filename,
+                    stat_buffer.st_size);
+                    send(remote, header, strlen(header), 0);
+                    int fd = open(full_name, O_RDONLY);
+                    if (fd < 0) {
+                        perror("Failed to open file");
+                        goto cleanup;
+                    }
+            		ssize_t bytes_sent =
+			            sendfile(remote, fd, NULL, stat_buffer.st_size);
+                    if (bytes_sent == -1) {
+                        perror("Failed to send file");
+                        close(fd);
+                        goto cleanup;
+                    }
+                }
 				perror("Failed to open file");
 				goto cleanup;
 			}
@@ -313,8 +342,7 @@ char *extract_filename(const char *request, int *err)
 
 	if (!validate_request_method(req_cpy)) {
 		// Request did not begin with acceptable method
-		// TODO: return 400 error to client
-		*err = -1;
+		*err = 400;
 		free(req_cpy);
 		return NULL;
 	}
@@ -362,11 +390,10 @@ bool validate_request_legality(const char *root, const char *target,
 	char *final_path = NULL;
 	bool is_legal = false;
 	// Default error is 403 forbidden
-	const char *err_format = "%s/error/403.html";
+	const char *err_file = "error/403.html";
 
 	root_path = realpath(root, NULL);
 	if (!root_path) {
-		// TODO: disambiguate OOM case
 		goto cleanup;
 	}
 
@@ -379,7 +406,6 @@ bool validate_request_legality(const char *root, const char *target,
 	size_t full_path_len = root_path_len + strlen(target) + 6;
 	full_path = malloc(sizeof(*full_path) * full_path_len);
 	if (!full_path) {
-		// TODO: disambiguate OOM case
 		goto cleanup;
 	}
 
@@ -398,17 +424,10 @@ bool validate_request_legality(const char *root, const char *target,
 			goto cleanup;
 		} else if (errno == ENOENT) {
 			// File not found
-			err_format = "%s/error/404.html";
+			err_file = "error/404.html";
 		}
 		// 16 bytes from "/error/404.html" + '\0'
-		size_t err_path_len = root_path_len + 16;
-		char *err_path = malloc(sizeof(*err_path) * err_path_len);
-		if (!err_path) {
-			// Malloc error
-			goto cleanup;
-		}
-		snprintf(err_path, root_path_len + 16, err_format, root_path);
-		*full_name = err_path;
+        *full_name = strdup(err_file);
 		goto cleanup;
 	}
 
@@ -434,14 +453,7 @@ bool validate_request_legality(const char *root, const char *target,
 		*full_name = strdup(full_path);
 	} else {
 		// 16 bytes from "/error/403.html" + '\0'
-		size_t err_path_len = root_path_len + 16;
-		char *err_path = malloc(sizeof(*err_path) * err_path_len);
-		if (!err_path) {
-			// Malloc error
-			goto cleanup;
-		}
-		snprintf(err_path, root_path_len + 16, err_format, root_path);
-		*full_name = err_path;
+		*full_name = strdup(err_file);
 	}
 
  cleanup:

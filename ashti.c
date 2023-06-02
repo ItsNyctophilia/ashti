@@ -1,4 +1,5 @@
 #define _POSIX_C_SOURCE 201112L
+#define _XOPEN_SOURCE 800
 #define _DEFAULT_SOURCE
 
 #include <sys/types.h>
@@ -16,10 +17,13 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
+char *uid_to_str(uid_t uid);
+
+
 int main(int argc, char *argv[])
 {
-    if(argc != 2) {
-        fprintf(stderr, "Usage: %s <port>\n", argv[0]);
+    if(argc == 1 || argc > 2) {
+        fprintf(stderr, "Usage: %s server_root\n", argv[0]);
         return EX_USAGE;
     }
 
@@ -28,9 +32,17 @@ int main(int argc, char *argv[])
     hints.ai_socktype = SOCK_STREAM;
     // Hints that we want to bind to a socket in server scenario
     hints.ai_flags = AI_PASSIVE;
+
+    uid_t uid = getuid();
+    char *uid_str = uid_to_str(uid);
+    if (!uid_str) {
+        perror("Failed to allocate memory for buffer");
+        return EX_OSERR;
+    }
     struct addrinfo *results;
-    int err = getaddrinfo(NULL, argv[1], &hints, &results);
-    if(err != 0) {
+    int err = getaddrinfo(NULL, uid_str, &hints, &results);
+    free(uid_str);
+    if (err != 0) {
         fprintf(stderr, "Cannot get address: %s\n", gai_strerror(err));
         return EX_NOHOST;
     }
@@ -116,14 +128,17 @@ int main(int argc, char *argv[])
 
             if(received < 0) {
                 perror("Unable to receive");
+                // Error?
             }
 
+            // Potentially sometimes overwrites a single char?
             buffer[total_received] = '\0';  // Null-terminate the received message
-            printf("Received message:\n%s\n", buffer);
+            // printf("Received message:\n%s\n", buffer);
+            
 
             free(buffer);  // Free the dynamically allocated buffer
             close(remote);
-            puts("");
+            putchar('\n');
 
             return 0;  // Exit the child process
         } else {
@@ -133,4 +148,15 @@ int main(int argc, char *argv[])
     }
 
     close(sd);
+}
+
+char *uid_to_str(uid_t uid)
+{
+    // Max port: 65535 + '\0'
+    char *uid_str = malloc(sizeof(*uid_str) * 7);
+    if (!uid_str) {
+        return NULL;
+    }
+    snprintf(uid_str, 7, "%d", uid);
+    return uid_str;
 }

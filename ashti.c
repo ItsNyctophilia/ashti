@@ -7,6 +7,7 @@
 #include <netdb.h>
 
 #include <dirent.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
 #include <sysexits.h>
@@ -20,6 +21,8 @@
 
 char *uid_to_str(uid_t uid);
 int validate_root_dir(const char *directory);
+char *extract_filename(const char *request, int *err);
+bool validate_request_method(const char *request);
 
 int main(int argc, char *argv[])
 {
@@ -141,7 +144,13 @@ int main(int argc, char *argv[])
 
             // Potentially sometimes overwrites a single char?
             buffer[total_received] = '\0';  // Null-terminate the received message
-            // printf("Received message:\n%s\n", buffer);
+            printf("Received message:\n%s\n", buffer);
+            int err = 0;
+            char *filename = extract_filename(buffer, &err);
+            if (!filename) {
+                printf("error2");
+                // error handling for 400 error and malloc issues
+            }
             
 
             free(buffer);  // Free the dynamically allocated buffer
@@ -230,4 +239,55 @@ int validate_root_dir(const char *directory)
 cleanup:
 	free(dir_cpy);
 	return rc;
+}
+
+char *extract_filename(const char *request, int *err)
+{
+	char *req_cpy = strdup(request);
+	if (!req_cpy) {
+        *err = EX_OSERR;
+		return NULL;
+	}
+
+	if (!validate_request_method(req_cpy)) {
+		// Request did not begin with acceptable method
+		// TODO: return 400 error to client
+        *err = -1;
+		free(req_cpy);
+		return NULL;
+	}
+
+	char *saveptr;
+	// First call consumes request method
+	char *sub_str = strtok_r(req_cpy, " \n", &saveptr);
+	// Second call has sub_str pointing at requested resource
+	sub_str = strtok_r(NULL, " \n", &saveptr);
+	char *filename = strdup(sub_str);
+	if (!filename) {
+        *err = EX_OSERR;
+		free(req_cpy);
+		return NULL;
+	}
+	free(req_cpy);
+	return filename;
+}
+
+bool validate_request_method(const char *request)
+{
+	char *get_chk = strstr(request, "GET");
+	char *head_chk = strstr(request, "HEAD");
+	// Validate that substr "GET" or "HEAD" is in request
+	if (!get_chk && !head_chk) {
+		return false;
+	}
+	// Validate that if "GET" in request, that it begins the request
+	// and that it is followed by a space
+	if (get_chk && (*(get_chk + 3) != ' ' || get_chk != request)) {
+		return false;
+	}
+	// Same as for "GET", but for "HEAD"
+	if (head_chk && (*(head_chk + 4) != ' ' || head_chk != request)) {
+		return false;
+	}
+	return true;
 }

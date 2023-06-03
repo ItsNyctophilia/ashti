@@ -137,32 +137,13 @@ int main(int argc, char *argv[])
 			}
 
 			size_t total_received = 0;
-			ssize_t received = recv(remote, buffer + total_received,
-						buffer_size - total_received -
-						1, 0);
-			if (received > 0) {
-				total_received += (size_t)received;
-				if (total_received >= buffer_size - 1) {
-					// Expand the buffer size using realloc
-					buffer_size *= 2;
-					char *new_buffer =
-					    realloc(buffer, buffer_size);
-					if (new_buffer == NULL) {
-						perror
-						    ("Failed to reallocate memory for buffer");
-						free(buffer);
-						close(remote);
-						return EX_OSERR;
-					}
-					buffer = new_buffer;
-				}
-			} else if (received < 0) {
-				perror("Unable to receive");
-				// Error? Maybe remove???
-			}
-			// Potentially sometimes overwrites a single char?
-			buffer[total_received] = '\0';	// Null-terminate the received message
-			printf("Received message:\n%s\n", buffer);
+            // Only reading a single header; one recv call is sufficient
+			ssize_t received = recv(remote, buffer, buffer_size - 1, 0);
+            // Null-terminate the received message
+			buffer[received] = '\0';
+			// Devprint
+            printf("Received message:\n%s\n", buffer);
+
 			int err = 0;
             size_t code = 200;	// Default is '200 OK'
             char *header = NULL;

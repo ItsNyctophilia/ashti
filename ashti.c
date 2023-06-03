@@ -33,7 +33,7 @@ bool validate_request_legality(const char *root, const char *target,
 			       char **full_name);
 char *prepare_headers(const size_t server_code,
 		      const char *filename, const off_t filesize);
-char* execute_cgi_script(const char* script_path);
+char *execute_cgi_script(const char *script_path);
 
 int main(int argc, char *argv[])
 {
@@ -137,80 +137,94 @@ int main(int argc, char *argv[])
 				close(remote);
 				return EX_OSERR;
 			}
-
-            // Only reading a single header; one recv call is sufficient
-			ssize_t received = recv(remote, buffer, buffer_size - 1, 0);
-            // Null-terminate the received message
+			// Only reading a single header; one recv call is sufficient
+			ssize_t received =
+			    recv(remote, buffer, buffer_size - 1, 0);
+			// Null-terminate the received message
 			buffer[received] = '\0';
 			// Devprint
-            printf("Received message:\n%s\n", buffer);
+			// printf("Received message:\n%s\n", buffer);
 
 			int err = 0;
-            size_t code = 200;	// Default is '200 OK'
-            char *header = NULL;
-            char *full_name = NULL;
+			size_t code = 200;	// Default is '200 OK'
+			char *header = NULL;
+			char *full_name = NULL;
+			bool head_request = false;
 
+			if (strstr(buffer, "HEAD")) {
+				head_request = true;
+			}
 			char *filename = extract_filename(buffer, &err);
 			if (!filename) {
 				code = err;
-                full_name = strdup("error/400.html");
+				full_name = strdup("error/400.html");
 			}
-            if (code == 200) {
-                bool valid =
-                    validate_request_legality(argv[1], filename,
-                                &full_name);
-                if (!valid && !full_name) {
-                    perror
-                        ("Failed to reallocate memory for buffer");
-                    return EX_OSERR;
-                } else if (!valid && errno == ENOENT) {
-                    code = 404;
-                } else if (!valid) {
-                    code = 403;
-                }
-            }
-        
-            if (strstr(full_name, "/cgi-bin/")) {
-                char *cgi_output = execute_cgi_script(full_name);
-                if (!cgi_output) {
-                    free(full_name);
-                    full_name = strdup("error/500.html");
-                    code = 500;
-                } else {
-                send(remote, cgi_output, strlen(cgi_output), 0);
-                free(cgi_output);
-                goto cleanup;
-                }
-            }
+			if (code == 200) {
+				bool valid =
+				    validate_request_legality(argv[1], filename,
+							      &full_name);
+				if (!valid && !full_name) {
+					perror
+					    ("Failed to reallocate memory for buffer");
+					return EX_OSERR;
+				} else if (!valid && errno == ENOENT) {
+					code = 404;
+				} else if (!valid) {
+					code = 403;
+				}
+			}
 
+			if (strstr(full_name, "/cgi-bin/")) {
+				char *cgi_output =
+				    execute_cgi_script(full_name);
+				if (cgi_output && !head_request) {
+                    ssize_t bytes_sent = send(remote, cgi_output, strlen(cgi_output), 0);
+                    free(cgi_output);
+
+                    if (bytes_sent == -1) {
+                        perror("Failed to send CGI output");
+                    }
+                    goto cleanup;
+				} else if (!cgi_output) {
+					free(full_name);
+					full_name = strdup("error/500.html");
+					code = 500;                    
+                } else {
+                    free(cgi_output);
+                }
+
+			}
 			// Get a file descriptor for sendfile() call later
 			int fd = open(full_name, O_RDONLY);
 			if (fd < 0) {
-                if (errno == EACCES) {
-                    // Only occurs when file exists and has
-                    code = 403;
-                    free(full_name);
-                    full_name = strdup("error/403.html");
-                    struct stat stat_buffer;
-                    if (stat(full_name, &stat_buffer) != 0) {
-                        perror("Failed to retrieve file information");
-                        goto cleanup;
-                    }
-                    header = prepare_headers(code, filename,
-                    stat_buffer.st_size);
-                    send(remote, header, strlen(header), 0);
-                    int fd = open(full_name, O_RDONLY);
-                    if (fd < 0) {
-                        perror("Failed to open file");
-                        goto cleanup;
-                    }
-            		ssize_t bytes_sent =
-			            sendfile(remote, fd, NULL, stat_buffer.st_size);
-                    if (bytes_sent == -1) {
-                        perror("Failed to send file");
-                        goto cleanup;
-                    }
-                }
+				if (errno == EACCES) {
+					// Only occurs when file exists and has bad permissions
+					code = 403;
+					free(full_name);
+					full_name = strdup("error/403.html");
+					struct stat stat_buffer;
+					if (stat(full_name, &stat_buffer) != 0) {
+						perror
+						    ("Failed to retrieve file information");
+						goto cleanup;
+					}
+					header = prepare_headers(code, filename,
+								 stat_buffer.
+								 st_size);
+					send(remote, header, strlen(header), 0);
+					int fd = open(full_name, O_RDONLY);
+					if (fd < 0) {
+						perror("Failed to open file");
+						goto cleanup;
+					}
+					ssize_t bytes_sent =
+					    sendfile(remote, fd, NULL,
+						     stat_buffer.st_size);
+					if (bytes_sent == -1) {
+						perror("Failed to send file");
+					}
+					goto cleanup;
+				}
 				perror("Failed to open file");
 				goto cleanup;
 			}
@@ -227,15 +241,18 @@ int main(int argc, char *argv[])
 					    stat_buffer.st_size);
 			send(remote, header, strlen(header), 0);
 			// Send file to remote client
-			ssize_t bytes_sent =
-			    sendfile(remote, fd, NULL, stat_buffer.st_size);
-			if (bytes_sent == -1) {
-				perror("Failed to send file");
-				close(fd);
-				goto cleanup;
-			}
+            if (head_request && code == 200) {
+                close(fd);
+                goto cleanup;
+            }
+            ssize_t bytes_sent =
+                sendfile(remote, fd, NULL, stat_buffer.st_size);
+            if (bytes_sent == -1) {
+                perror("Failed to send file");
+                close(fd);
+            }
 
- cleanup:
+cleanup:
 			free(full_name);
 			free(filename);
 			free(buffer);
@@ -255,77 +272,76 @@ int main(int argc, char *argv[])
 
 char *execute_cgi_script(const char *script_path)
 {
-    int stdout_pipe[2];
-    int stderr_pipe[2];
-    if (pipe(stdout_pipe) < 0 || pipe(stderr_pipe) < 0) {
-        perror("Failed to create pipe");
-        return NULL;
-    }
+	int stdout_pipe[2];
+	int stderr_pipe[2];
+	if (pipe(stdout_pipe) < 0 || pipe(stderr_pipe) < 0) {
+		perror("Failed to create pipe");
+		return NULL;
+	}
 
-    pid_t child_pid = fork();
-    if (child_pid < 0) {
-        perror("Failed to fork process");
-        return NULL;
-    } else if (child_pid == 0) {
-        // Child process
-        // Close the read end of the stdout pipe
-        close(stdout_pipe[0]);
-        // Close the read end of the stderr pipe
-        close(stderr_pipe[0]);
-        if (dup2(stdout_pipe[1], STDOUT_FILENO) < 0) {
-            perror("Failed to redirect stdout");
-            return NULL;
-        }
-        // Close duplicated write end of the stdout pipe
-        close(stdout_pipe[1]);
+	pid_t child_pid = fork();
+	if (child_pid < 0) {
+		perror("Failed to fork process");
+		return NULL;
+	} else if (child_pid == 0) {
+		// Child process
+		// Close the read end of the stdout pipe
+		close(stdout_pipe[0]);
+		// Close the read end of the stderr pipe
+		close(stderr_pipe[0]);
+		if (dup2(stdout_pipe[1], STDOUT_FILENO) < 0) {
+			perror("Failed to redirect stdout");
+			return NULL;
+		}
+		// Close duplicated write end of the stdout pipe
+		close(stdout_pipe[1]);
 
-        if (dup2(STDERR_FILENO, STDERR_FILENO) < 0) {
-            perror("Failed to redirect stderr");
-            return NULL;
-        }
+		if (dup2(STDERR_FILENO, STDERR_FILENO) < 0) {
+			perror("Failed to redirect stderr");
+			return NULL;
+		}
+		// Execute the CGI script
+		if (execl(script_path, script_path, NULL) < 0) {
+			perror("Failed to execute CGI script");
+			return NULL;
+		}
+	} else {
+		// Parent process
+		// Close the write end of the stdout pipe
+		close(stdout_pipe[1]);
+		// Close the write end of the stderr pipe
+		close(stderr_pipe[1]);
+		// Arbitrary buffer size
+		char buffer[1024];
+		size_t total_received = 0;
+		ssize_t received;
 
-        // Execute the CGI script
-        if (execl(script_path, script_path, NULL) < 0) {
-            perror("Failed to execute CGI script");
-            return NULL;
-        }
-    } else {
-        // Parent process
-        // Close the write end of the stdout pipe
-        close(stdout_pipe[1]);
-        // Close the write end of the stderr pipe
-        close(stderr_pipe[1]);
-        // Arbitrary buffer size
-        char buffer[1024];
-        size_t total_received = 0;
-        ssize_t received;
+		char *output = NULL;
+		while ((received = read(stdout_pipe[0], buffer, 1024)) > 0) {
+			output = realloc(output, total_received + received + 1);
+			if (!output) {
+				perror("Failed to allocate memory for buffer");
+				return NULL;
+			}
+			memcpy(output + total_received, buffer, received);
+			total_received += received;
+		}
 
-        char* output = NULL;
-        while ((received = read(stdout_pipe[0], buffer, 1024)) > 0) {
-            output = realloc(output, total_received + received + 1);
-            if (!output) {
-                perror("Failed to allocate memory for buffer");
-                return NULL;
-            }
-            memcpy(output + total_received, buffer, received);
-            total_received += received;
-        }
+		if (received < 0) {
+			perror("Failed to read from pipe");
+			return NULL;
+		}
 
-        if (received < 0) {
-            perror("Failed to read from pipe");
-            return NULL;
-        }
+		output[total_received] = '\0';
+		// Close the read end of the stdout pipe
+		close(stdout_pipe[0]);
 
-        output[total_received] = '\0';
-        // Close the read end of the stdout pipe
-        close(stdout_pipe[0]); 
+		// Wait for the child process to exit
+		waitpid(child_pid, NULL, 0);
 
-        // Wait for the child process to exit
-        waitpid(child_pid, NULL, 0);
-
-        return output;
-    }
-    return NULL;
+		return output;
+	}
+	return NULL;
 }
 
 char *uid_to_str(uid_t uid)
@@ -496,7 +512,7 @@ bool validate_request_legality(const char *root, const char *target,
 			err_file = "error/404.html";
 		}
 		// 16 bytes from "/error/404.html" + '\0'
-        *full_name = strdup(err_file);
+		*full_name = strdup(err_file);
 		goto cleanup;
 	}
 

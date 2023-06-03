@@ -1,0 +1,68 @@
+\documentclass{article}
+
+\title{FDR Design Plan}
+\author{James Viner and Elliott Lefler}
+\date{May 2023}
+\begin{document}
+\maketitle
+\section*{\textbf{Overview}}
+Create A server that accepts HTTP requests and servers content from the servers directories.
+
+\section*{\Huge{Architecture}}
+
+\section*{\huge{Significant functions}}
+
+
+\subsection*{bool validate\_root\_dir(const char *directory);}
+\hspace{.5cm} This function accepts a string and validates that the directory exists and that it has a www and a cgi-bin folder inside.
+
+\subsection*{char *extract\_filename(const char *request);}
+\hspace{.5cm} This function takes a GET/HEAD request header and takes out the filename, calling validate\_request\_method in the process, which ensures it is, in fact, a GET/HEAD request.
+
+
+\subsection*{static bool validate\_request\_legality(const char *root, const char *target);}
+\hspace{.5cm} This function ensures that a requested file on the server both a. exists and b. is allowed to be reached (inside of www or cgi-bin).
+
+\subsection*{static bool validate\_request\_method(const char *request);}
+
+
+\section*{\huge{Features}}
+\hspace{1cm} -Write a man(1) page to document the program
+
+\hspace{.5cm} -Write the writeup, test plan, and design plan using TeX or LaTeX.
+
+\hspace{.5cm} -Support Content-type: text, jpeg, png, or gif.
+
+\hspace{.5cm} -Support 405 responses for requests with unimplemented request 
+
+\hspace{.7cm} methods 
+
+
+\hspace{.5cm} -Support 403 responses for files lacking read permissions (in www) or
+
+\hspace{.7cm}read/execute permissions.
+
+
+
+\section*{\huge{\textbf{Tasks}}}
+
+\subsubsection*{Viner}
+\hspace{1cm} -parse HTTP request
+
+\hspace{.5cm} -validate file path and file integrity
+
+\hspace{.5cm} -error pages
+
+\subsubsection*{Lefler}
+
+\hspace{1cm} -Design Plan
+
+\hspace{.5cm} -Test Plan
+
+\hspace{.5cm} -Multiplex server
+
+
+
+
+
+\end{document}

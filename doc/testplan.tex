@@ -1,0 +1,80 @@
+\documentclass[11pt]{report}
+
+% Packages
+\usepackage[scaled]{helvet}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lipsum}
+\usepackage{inconsolata}
+\usepackage{enumitem}
+\usepackage[dvipsnames]{xcolor}
+\usepackage{setspace}
+
+% Page Defaults
+\renewcommand\familydefault{\sfdefault}
+\pagenumbering{gobble}
+
+% Variables
+\def\dirname{ashti}
+\def\docname{Ashti}
+
+\title{Test Plan - \docname}
+\author{James Viner, Elliott Lefler}
+\date{} %Remove date
+\begin{document}
+
+\maketitle
+
+\doublespacing
+
+\pagebreak
+\section*{Automated Test Cases}
+Automated tests may be executed with {\texttt{\color{MidnightBlue}make check}}, which builds the executable and runs a bash script that performs unit testing for this program. Additional test details can be found in {\texttt{\color{MidnightBlue}test/test.bash}}; if the script does not run, check whether or not it is executable.
+\pagebreak
+\section*{Common Test Cases}
+Prerequisites: {\texttt{\color{MidnightBlue}\dirname/}} directory does not already exist.
+\subsection*{TC1: Installation}
+\begin{enumerate}
+  \item {\texttt{\color{MidnightBlue}git clone} {\color{MidnightBlue}git@git.umbc.tc}}{\color{MidnightBlue}:tdqc/tdqc12/elile/\dirname.git}
+  \item {\texttt{\color{MidnightBlue}cd \dirname}}
+\end{enumerate}
+\textbf{Expected:} {\texttt{\color{MidnightBlue}\dirname/}} directory is created.
+\subsection*{TC2: Correct branch}
+\begin{enumerate}
+  \item {\color{MidnightBlue}git branch}
+\end{enumerate}
+\textbf{Expected:} {\color{MidnightBlue}main} is default branch.
+\subsection*{TC3: Build cleaning}
+\begin{enumerate}
+  \item {\texttt{\color{MidnightBlue}make}}
+  \item {\texttt{\color{MidnightBlue}make clean}}
+  \item {\texttt{\color{MidnightBlue}ls}}
+\end{enumerate}
+\textbf{Expected:} No .o files or executable files are left in directory.
+\pagebreak
+\section*{Project-Building Test Cases}
+Prerequisites: In the project's directory; have run {\texttt{\color{MidnightBlue}make clean}}.
+\subsection*{TC4: Build Explicit}
+\begin{enumerate}
+  \item {\texttt{\color{MidnightBlue}make \dirname}}
+  \item {\texttt{\color{MidnightBlue}ls \dirname}}
+\end{enumerate}
+\textbf{Expected:} File is listed.
+\subsection*{TC5: Build Implicit}
+\begin{enumerate}
+  \item {\texttt{\color{MidnightBlue}make}}
+  \item {\texttt{\color{MidnightBlue}ls \dirname}}
+\end{enumerate}
+\textbf{Expected:} File is listed.
+\subsection*{TC6: Build debugging}
+\begin{enumerate}
+  \item {\texttt{\color{MidnightBlue}make debug}}
+  \item {\texttt{\color{MidnightBlue}readelf --debug-dump=decodedline maze}}
+\end{enumerate}
+\textbf{Expected:} Debugging info is listed.
+\subsection*{TC7: Build profiling}
+\begin{enumerate}
+  \item {\texttt{\color{MidnightBlue}make profile}}
+\end{enumerate}
+\textbf{Expected:} Program build output contains -gp flags.
+\end{document}

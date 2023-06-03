@@ -255,8 +255,9 @@ int main(int argc, char *argv[])
 
 char *execute_cgi_script(const char *script_path)
 {
-    int pipe_fds[2];
-    if (pipe(pipe_fds) < 0) {
+    int stdout_pipe[2];
+    int stderr_pipe[2];
+    if (pipe(stdout_pipe) < 0 || pipe(stderr_pipe) < 0) {
         perror("Failed to create pipe");
         return NULL;
     }
@@ -267,16 +268,21 @@ char *execute_cgi_script(const char *script_path)
         return NULL;
     } else if (child_pid == 0) {
         // Child process
-        close(pipe_fds[0]); // Close the read end of the pipe
-        if (dup2(pipe_fds[1], STDOUT_FILENO) < 0) {
+        // Close the read end of the stdout pipe
+        close(stdout_pipe[0]);
+        // Close the read end of the stderr pipe
+        close(stderr_pipe[0]);
+        if (dup2(stdout_pipe[1], STDOUT_FILENO) < 0) {
             perror("Failed to redirect stdout");
             return NULL;
         }
-        if (dup2(pipe_fds[1], STDERR_FILENO) < 0) {
+        // Close duplicated write end of the stdout pipe
+        close(stdout_pipe[1]);
+
+        if (dup2(STDERR_FILENO, STDERR_FILENO) < 0) {
             perror("Failed to redirect stderr");
             return NULL;
         }
-        close(pipe_fds[1]); // Close the duplicated write end of the pipe
 
         // Execute the CGI script
         if (execl(script_path, script_path, NULL) < 0) {
@@ -285,24 +291,21 @@ char *execute_cgi_script(const char *script_path)
         }
     } else {
         // Parent process
-        close(pipe_fds[1]); // Close the write end of the pipe
-
-        // Generic buffer size (replace later)
+        // Close the write end of the stdout pipe
+        close(stdout_pipe[1]);
+        // Close the write end of the stderr pipe
+        close(stderr_pipe[1]);
+        // Arbitrary buffer size
         char buffer[1024];
         size_t total_received = 0;
         ssize_t received;
 
         char* output = NULL;
-        size_t output_size = 0;
-        
-        while ((received = read(pipe_fds[0], buffer, 1024)) > 0) {
-            if (total_received + received + 1 > output_size) {
-                output_size += 1024;
-                output = realloc(output, output_size);
-                if (!output) {
-                    perror("Failed to allocate memory for buffer");
-                    return NULL;
-                }
+        while ((received = read(stdout_pipe[0], buffer, 1024)) > 0) {
+            output = realloc(output, total_received + received + 1);
+            if (!output) {
+                perror("Failed to allocate memory for buffer");
+                return NULL;
             }
             memcpy(output + total_received, buffer, received);
             total_received += received;
@@ -313,14 +316,9 @@ char *execute_cgi_script(const char *script_path)
             return NULL;
         }
 
-        output = realloc(output, total_received + 1);
-        if (!output) {
-            perror("Failed to allocate memory for output");
-            return NULL;
-        }
         output[total_received] = '\0';
-
-        close(pipe_fds[0]); // Close the read end of the pipe
+        // Close the read end of the stdout pipe
+        close(stdout_pipe[0]); 
 
         // Wait for the child process to exit
         waitpid(child_pid, NULL, 0);

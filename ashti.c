@@ -105,18 +105,14 @@ int main(int argc, char *argv[])
 
 		int remote = accept(sd, (struct sockaddr *)&client, &client_sz);
 
-		unsigned short port = 0;
 		if (client.ss_family == AF_INET6) {
 			inet_ntop(client.ss_family,
 				  &((struct sockaddr_in6 *)&client)->sin6_addr,
 				  addr, sizeof(addr));
-			port =
-			    ntohs(((struct sockaddr_in6 *)&client)->sin6_port);
 		} else {
 			inet_ntop(client.ss_family,
 				  &((struct sockaddr_in *)&client)->sin_addr,
 				  addr, sizeof(addr));
-			port = ntohs(((struct sockaddr_in *)&client)->sin_port);
 		}
 
 		pid_t child_pid = fork();
@@ -211,7 +207,8 @@ int main(int argc, char *argv[])
 						goto cleanup;
 					}
 					header = prepare_headers(code, filename,
-								 stat_buffer.st_size);
+								 stat_buffer.
+								 st_size);
 					send(remote, header, strlen(header), 0);
 					int fd = open(full_name, O_RDONLY);
 					if (fd < 0) {

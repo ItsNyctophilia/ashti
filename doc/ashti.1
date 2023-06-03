@@ -1,0 +1,112 @@
+.TH ashti 1 "June 2023" "Version 1.0" "User Commands"
+.SH NAME
+Ashti - The Ashti server is a lightweigh web server implemented in C programming language. It is designed to handle basic HTTP requests and serve static files from a specified root directory. The server supports GET and HEAD methods and can handle concurrent connections using forked child processes.
+
+The server code follows a simple flow where it listens for incoming connections on a specified port, accepts client connections, and forks a child process to handle each client request independently. It reads the HTTP request from the client, extracts the requested filename, validates the request method and legality, and prepares the appropriate HTTP response headers.
+
+If the requested file is a CGI script located in the "/cgi-bin/" directory, the server executes the script and sends the output back to the client. For other static files, the server uses the sendfile function to efficiently transmit the file content to the client.
+
+The Ashti server provides basic error handling for common scenarios such as invalid requests, file not found, or permission denied. It includes default error pages for these cases and sends the appropriate HTTP status codes in the response.
+
+Overall, the Ashti server offers a minimalistic yet functional implementation for serving static files and executing CGI scripts over the HTTP protocol.
+.SH SYNOPSIS
+.B ashti
+[\fIoptions\fR] [\fIserver_root\fR]
+.SH DESCRIPTION
+The \fBscript_name\fR script is a server that listens for incoming TCP connections and handles HTTP requests. It provides a basic web server functionality by serving files from the specified server root directory. The script supports GET and HEAD request methods and handles CGI scripts placed in the "/cgi-bin" directory.
+
+The \fIserver_root\fR argument specifies the root directory from which the files are served. Only one argument is expected, and it should be the path to the server root directory.
+
+The script listens on a socket bound to the server's IP address and a dynamically assigned port number based on the user's UID. It accepts incoming connections and forks a child process to handle each connection independently. The child process receives an HTTP request, parses it, and determines the appropriate response.
+
+If the requested resource is a regular file, the script sends the file's contents as the response. If the request is a CGI script located in the "/cgi-bin" directory, the script executes the script and sends the script's output as the response.
+
+The script handles various error conditions, such as invalid requests, file not found, insufficient permissions, and internal server errors. In case of an error, it sends an appropriate error response to the client.
+
+.SH OPTIONS
+.TP
+\fBserver_root\fR
+The path to the server root directory. This argument is mandatory and should be provided as the last argument when invoking the script.
+
+.SH EXAMPLES
+To start the server and serve files from the "/var/www/html" directory, run:
+.PP
+.B ashti /var/www/html
+
+.SH EXIT STATUS
+The script returns the following exit status codes:
+.TP
+0
+Success.
+.TP
+64
+Command-line usage error.
+.TP
+69
+Invalid server root directory.
+.TP
+71
+Failed to allocate memory for buffer.
+.TP
+72
+Failed to create a socket.
+.TP
+73
+Failed to mark socket for address reuse.
+.TP
+74
+Failed to bind socket.
+.TP
+75
+Failed to listen on socket.
+.TP
+78
+Failed to fork a child process.
+.TP
+99
+Cannot get address.
+.TP
+111
+Connection refused.
+.TP
+124
+Timed out while waiting for connection.
+.TP
+200
+Script execution completed successfully.
+.SH SEE ALSO
+Refer to the documentation or man pages for the following commands or libraries used in the script:
+.TP
+\fIsocket\fR(2)
+.TP
+\fIbind\fR(2)
+.TP
+\fIlisten\fR(2)
+.TP
+\fIaccept\fR(2)
+.TP
+\fIgetaddrinfo\fR(3)
+.TP
+\fIopen\fR(2)
+.TP
+\fIsend\fR(2)
+.TP
+\fIrecv\fR(2)
+.TP
+\fIstat\fR(2)
+.TP
+\fIsendfile\fR(2)
+.TP
+\fIstrdup\fR(3)
+.TP
+\fIclosdir\fR(3)
+.TP
+\fImalloc\fR(3)
+.TP
+\fIrealloc\fR(3)
+.TP
+\fIfree\fR(3)
+.TP
+\fIstrtok_r\fR(3)
+.SH AUTHORS
+Written by James Viner and Elliott Lefler.

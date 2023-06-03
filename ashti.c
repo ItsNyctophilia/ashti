@@ -118,7 +118,6 @@ int main(int argc, char *argv[])
 				  addr, sizeof(addr));
 			port = ntohs(((struct sockaddr_in *)&client)->sin_port);
 		}
-		printf("Received from %s:%hu\n", addr, port);
 
 		pid_t child_pid = fork();
 		if (child_pid < 0) {
@@ -178,20 +177,23 @@ int main(int argc, char *argv[])
 				char *cgi_output =
 				    execute_cgi_script(full_name);
 				if (cgi_output && !head_request) {
-                    ssize_t bytes_sent = send(remote, cgi_output, strlen(cgi_output), 0);
-                    free(cgi_output);
+					ssize_t bytes_sent =
+					    send(remote, cgi_output,
+						 strlen(cgi_output), 0);
+					free(cgi_output);
 
-                    if (bytes_sent == -1) {
-                        perror("Failed to send CGI output");
-                    }
-                    goto cleanup;
+					if (bytes_sent == -1) {
+						perror
+						    ("Failed to send CGI output");
+					}
+					goto cleanup;
 				} else if (!cgi_output) {
 					free(full_name);
 					full_name = strdup("error/500.html");
-					code = 500;                    
-                } else {
-                    free(cgi_output);
-                }
+					code = 500;
+				} else {
+					free(cgi_output);
+				}
 
 			}
 			// Get a file descriptor for sendfile() call later
@@ -209,8 +211,7 @@ int main(int argc, char *argv[])
 						goto cleanup;
 					}
 					header = prepare_headers(code, filename,
-								 stat_buffer.
-								 st_size);
+								 stat_buffer.st_size);
 					send(remote, header, strlen(header), 0);
 					int fd = open(full_name, O_RDONLY);
 					if (fd < 0) {
@@ -241,18 +242,18 @@ int main(int argc, char *argv[])
 					    stat_buffer.st_size);
 			send(remote, header, strlen(header), 0);
 			// Send file to remote client
-            if (head_request && code == 200) {
-                close(fd);
-                goto cleanup;
-            }
-            ssize_t bytes_sent =
-                sendfile(remote, fd, NULL, stat_buffer.st_size);
-            if (bytes_sent == -1) {
-                perror("Failed to send file");
-                close(fd);
-            }
+			if (head_request && code == 200) {
+				close(fd);
+				goto cleanup;
+			}
+			ssize_t bytes_sent =
+			    sendfile(remote, fd, NULL, stat_buffer.st_size);
+			if (bytes_sent == -1) {
+				perror("Failed to send file");
+				close(fd);
+			}
 
-cleanup:
+ cleanup:
 			free(full_name);
 			free(filename);
 			free(buffer);

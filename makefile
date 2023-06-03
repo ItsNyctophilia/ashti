@@ -3,12 +3,11 @@ CFLAGS += -Wvla -Wwrite-strings -Wfloat-equal
 CFLAGS += -std=c18
 
 
-ashti: ashti.o
-	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+ashti:
 
 .PHONY: clean
 clean:
-	rm -f ashti *.o
+	$(RM) ashti *.o
 
 .PHONY: debug
 debug: CFLAGS += -g
@@ -16,5 +15,11 @@ debug: ashti
 
 .PHONY: profile
 profile: CFLAGS += -pg
+profile: LDFLAGS += -pg
 profile: ashti
+
+.PHONY: check
+check: ashti
+check:
+	./test/test.bash
 

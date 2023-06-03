@@ -35,6 +35,7 @@ char *prepare_headers(const size_t server_code,
 		      const char *filename, const off_t filesize);
 char *execute_cgi_script(const char *script_path);
 
+// Initial server code sourced from Noel Bergman's tcp server example
 int main(int argc, char *argv[])
 {
 	if (argc == 1 || argc > 2) {
